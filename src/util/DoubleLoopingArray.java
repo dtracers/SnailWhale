@@ -8,7 +8,7 @@ import java.util.ArrayList;
  *
  * @param <E>
  */
-public class ReadWriteLoopingArray<E>
+public class DoubleLoopingArray<E>
 {
 
 	ArrayList<E> list;
@@ -17,32 +17,31 @@ public class ReadWriteLoopingArray<E>
 	 * This will always just count up
 	 * it might freak out with overflow so something to be aware of
 	 */
-	int totalReadIndex = 0;
+	protected int totalReadIndex = 0;
 	/**
 	 * Is only in the size of the Array
 	 */
-	int loopingReadIndex = 0;
+	protected int loopingReadIndex = 0;
 
 	/**
 	 * This will always just count up
 	 * it might freak out with overflow so something to be aware of
 	 */
-	int totalWriteIndex = 0;
+	protected int totalWriteIndex = 0;
 	/**
 	 * Is only in the size of the Array
 	 */
-	int loopingWriteIndex = 0;
+	protected int loopingWriteIndex = 0;
 
 	int size = 0;
-	public ReadWriteLoopingArray(int size)
+	public DoubleLoopingArray(int size)
 	{
-		this.size = size;
-		list = new ArrayList<E>();
+		this(new ArrayList<E>(),size);
 	}
 
-	public ReadWriteLoopingArray(ArrayList<E> list)
+	public DoubleLoopingArray(ArrayList<E> list, int size)
 	{
-		this.size = list.size();
+		this.size = size;
 		this.list = list;
 	}
 
@@ -105,4 +104,12 @@ public class ReadWriteLoopingArray<E>
 		return totalWriteIndex;
 	}
 
+
+	public void reset()
+	{
+		totalWriteIndex = 0;
+		totalReadIndex = 0;
+		loopingWriteIndex = 0;
+		loopingReadIndex = 0;
+	}
 }

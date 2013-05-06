@@ -1,290 +1,184 @@
 package io;
 
-import java.io.FileNotFoundException;
+import java.io.File;
 import java.util.ArrayList;
 
-import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.audio.AudioDevice;
-import com.badlogic.gdx.audio.io.Decoder;
-import com.badlogic.gdx.audio.io.VorbisDecoder;
-import com.badlogic.gdx.audio.io.WavDecoder;
-import com.badlogic.gdx.files.FileHandle;
-import com.musicgame.PumpAndJump.Util.FileFormatException;
-import com.musicgame.PumpAndJump.game.PumpAndJump;
-import com.musicgame.PumpAndJump.objects.Obstacle;
+import math.StaticNumbers;
 
-public class MusicHandler extends Thread
+
+import static math.StaticNumbers.*;
+import util.SafeReadWriteLoopingArray;
+import util.StoppableThread;
+
+public abstract class MusicHandler
 {
-	//for both
-	public static final int arraySampleLength = 6000;
-	public static final int minBufferDistance = 20;
-	public static final int maxBufferDistance = arraySampleLength/2;
-	public static final int frameSize = 256;//1024*8;//256;// 1024/4;
-	public static final int LargeFrameSize = frameSize*4;//1024*8;//256;// 1024/4;
-	public static final int sampleRate = 44100;
-	ArrayList<short[]> musicFile = new ArrayList<short[]>();
+	InputDevice decoder;
+	OutputDevice device;
+	SafeReadWriteLoopingArray<short[]> musicFile;
 
+	short[] buf;
 
-	public static String fileName= "the_hand_that_feeds.wav";
-//	public String fileName= "the_hand_that_feeds.mp3";
-//	public String fileName= "Skrillex_Cinema.wav";
-//	public String fileName = "Windows_XP_Startup.wav";
-
-
-	//for input streaming
-	short[] buf = new short[frameSize*2];
-	Decoder decoder;
-	int inputFrame;
-	BeatDetector detect;
-
-	//other methods
 	public boolean buffering = true;
 	public boolean doneReading = false;
 	private boolean forceStop = false;
 	public boolean slowingDownBuffer = false;
 
-	//for output streaming
-	int outputFrame = 0;
 	public boolean songFinished = false;
-	AudioDevice device;
 
-	//location objects
-	int outputLocation = 0;
-	int inputLocation = 0;
-	public static double outputTimeReference = 0;
-	public static double inputTimeReference = 0;
+	public double outputTimeReference = 0;
+	public double inputTimeReference = 0;
 
 	private boolean stopRunning = false;
 
-	public MusicHandler(ArrayList<Obstacle> actualObjects)
+	StoppableThread input;
+	StoppableThread output;
+
+	public MusicHandler()
 	{
-		detect = new BeatDetector(actualObjects);
-		for(int k = 0;k<arraySampleLength;k++)
-		{
-			musicFile.add(new short[frameSize]);
-		}
-		setUpOutputStream();
+		buf = new short[frameSize*2];
+		musicFile = new SafeReadWriteLoopingArray<short[]>(true,maxBufferDistance,true,minBufferDistance,arraySampleLength);
 	}
 
-	//input methods
-
-	public void loadSound() throws FileNotFoundException, FileFormatException
+	public void loadSound(InputDevice input)
 	{
 		buffering = true;
-		outputFrame = 0;
-		inputFrame = 0;
-		outputTimeReference = 0;
+		musicFile.reset();
 		slowingDownBuffer = false;
 		forceStop = false;
-		FileHandle file = null;
-		try
-		{
-			file = Gdx.files.internal(fileName);
-			if(file == null)
-			{
-				int i = 1/0;
-			}
-		}catch(Exception e)
-		{
-			e.printStackTrace();
-			try
-			{
-				file = Gdx.files.absolute(fileName);
-				if(file == null)
-				{
-					int i = 1/0;
-				}
-			}catch(Exception e2)
-			{
-				file = Gdx.files.internal("the_hand_that_feeds.wav");
-				e2.printStackTrace();
-			}
-		}
-		if(file == null||!file.exists())
-		{
-			throw new FileNotFoundException(fileName);
 
-		}
-		//it is not null and it exists
-
-		String extension = file.extension();
-		System.out.println("extesnsion is "+extension);
-		if(extension.equalsIgnoreCase("wav"))
-		{
-			decoder = new WavDecoder(file);
-		}else if(extension.equalsIgnoreCase("mp3"))
-		{
-			System.out.println("Creating MP3 FILE VERSIOn");
-			decoder = PumpAndJump.MP3decoder.getInstance(file);
-		//	decoder = new Mpg123Decoder(file);
-		}else if(extension.equalsIgnoreCase("ogg"))
-		{
-			decoder = new VorbisDecoder(file);
-		}else
-		{
-			throw new FileFormatException("File format not supported "+extension);
-		}
+		decoder = input;
 	}
 
-	/**
-	 * The running thread that decompiles the music
-	 */
-	public void run()
+	public final void initializeInput()
 	{
-		outputFrame = 0;
-		inputFrame = 0;
-		int readSong = 1;
-		slowingDownBuffer = false;
-		buffering = true;
-		System.out.println("Starting reading ");
-
-		while(readSong > 0&&!stopRunning)
+		input = new StoppableThread()
 		{
-			if(stopRunning)
-				break;
-			if(!slowingDownBuffer)
+			int readSong = 1;
+			short[] longerArray = new short[LargeFrameSize];
+
+			@Override
+			public boolean update() throws InterruptedException
 			{
-				//System.out.println(inputFrame+" "+outputFrame);
-				short[] currentFrame = musicFile.get(inputLocation);
-				//has to convert it to mono
-				if(decoder.getChannels() == 2)
+				if(slowingDownBuffer)
 				{
-					readSong = decoder.readSamples(buf,0, frameSize*2);
-					for(int k=0;k<frameSize;k++)
+					Thread.sleep(100);
+					return true;
+				}
+				if(musicFile.canWrite())
+				{
+					short[] currentFrame = musicFile.writeElement();
+					//has to convert it to mono
+					if(decoder.getChannels() == 2)
 					{
-						currentFrame[k] = (short) ((buf[k*2]+buf[k*2+1])/2.0);//gets half of the song (maybe because it is stereo?)
+						readSong = decoder.readSamples(buf,0, frameSize*2);
+						for(int k=0;k<frameSize;k++)
+						{
+							currentFrame[k] = (short) ((buf[k*2]+buf[k*2+1])/2.0);//gets half of the song (maybe because it is stereo?)
+						}
+					}else //we can put it straight in
+					{
+						readSong = decoder.readSamples(currentFrame,0, frameSize);
 					}
-				}else //we can put it straight in
-				{
-					readSong = decoder.readSamples(currentFrame,0, frameSize);
-				}
-				inputFrame++;
-				if(!stopRunning)
-					inputTimeReference = (inputFrame*MusicHandler.frameSize)/((double)MusicHandler.sampleRate);
-				inputLocation = inputFrame%arraySampleLength;
-				if(inputFrame%4==0)
-					detect.combineArray(musicFile, inputFrame-4);
-				if(bufferDistance()>maxBufferDistance)
-				{
-			//		System.out.println("slow down doggy");
-					slowingDownBuffer = true;
-				}
-
-				if(buffering)
-				{
-					/*
-					try {
-						Thread.sleep(5);
-					} catch (InterruptedException e) {
-						e.printStackTrace();
-					}*/
-
+					if(!stopRunning)
+						inputTimeReference = (musicFile.getCurrentWritingIndex()*frameSize)/((double)sampleRate);
+					if(musicFile.getCurrentWritingIndex()%4==0)
+					{
+						combineArray(musicFile, musicFile.getCurrentWritingIndex()-4);
+						postWriteMethod(longerArray);
+					}
 				}else
 				{
-				//	System.out.println("Music Input");
-					/*
-					try {
-						Thread.sleep(5);
-					} catch (InterruptedException e) {
-						e.printStackTrace();
+					slowingDownBuffer = true;
+					input.stopThread();
+				}
+				return readSong>0;
+			}
+			private void combineArray(SafeReadWriteLoopingArray<short[]> musicFile, int startIndex)
+			{
+				ArrayList<short[]> list = musicFile.getList();
+				for(int k = 0 ;k<4;k++)
+				{
+					short[] tempArray = list.get((k+startIndex)%arraySampleLength);
+					int skipIndex = k*frameSize;
+					for(int q = 0;q<frameSize;q++)
+					{
+						longerArray[q+skipIndex] = tempArray[q];
 					}
-					*/
-				}
-			}else
-			{
-				try {
-					Thread.sleep(100);
-				} catch (InterruptedException e) {
-					e.printStackTrace();
 				}
 			}
-			if(forceStop)
+			@Override
+			public void postRunning()
 			{
-				System.out.println("STOPPING THE READING");
-				break;
+				doneReading = true;
+				musicFile.setMinDistance(true, 0);
 			}
-		}
-		System.out.println("FINISHED READING THE MUSIC FILE");
-		doneReading = true;
+
+		};
 	}
 
-
-	/**
-	 * Returns true if the bufferingDistance is less than the bufferDistance value
-	 * it is calculated by: MusicInputStream.currentFrame - OuputStream.currentFrame
-	 * @return
-	 */
-	public boolean bufferingNeeded()
+	public final void initializeOutput()
 	{
-		return inputFrame-outputFrame<minBufferDistance&&!doneReading;
-	}
-
-	/**
-	 * calcualtes how far off the minBufferDistance is away from the the actual buffer distance
-	 * @return
-	 */
-	public long minBufferingDistance()
-	{
-		return minBufferDistance - (inputFrame-outputFrame);
-	}
-
-	/**
-	 * calcualtes how far the inputframe is from the output frame
-	 * @return
-	 */
-	public long bufferDistance()
-	{
-		return inputFrame-outputFrame;
-	}
-
-
-
-	//output methods
-
-	public void setUpOutputStream()
-	{
-		device = Gdx.audio.newAudioDevice(44100, true);
-	}
-
-	/**
-	 * Outputs the song to the sound device!
-	 */
-	public void writeSound()
-	{
-		if(!songFinished)
-		{
-			short[] currentFrame = musicFile.get(outputLocation);
-			device.writeSamples(currentFrame, 0, frameSize);
-			if(bufferDistance()<maxBufferDistance)
-			{
-				slowingDownBuffer = false;//speed buffering back up as the input is to close
-			}
-			outputFrame++;
-			outputLocation =(outputFrame%arraySampleLength);//puts the output location at the correct place
-			outputTimeReference = (outputFrame*frameSize)/((double)sampleRate);
-			if(doneReading&&bufferDistance()<2)
-			{
-				System.out.println("DONE READING?");
-				songFinished = true;
-			}
-		}
-
-	}
-
-	//othe
-
-	public void dispose()
-	{
-		stopRunning = true;
-		songFinished = true;
-		musicFile.clear();
-		try
-		{
-			device.dispose();
-		}catch(Exception e)
+		output = new StoppableThread()
 		{
 
-		}
-		fileName = "the_hand_that_feeds.wav";
+			@Override
+			public boolean update() throws InterruptedException
+			{
+
+				if(!songFinished)
+				{
+					if(musicFile.canRead())
+					{
+						short[] currentFrame = musicFile.readElement();
+						device.writeSamples(currentFrame, 0, frameSize);
+						if(!musicFile.canWrite())
+						{
+							input.stopThread();
+						}else
+						{
+							input.stopThread();
+						}
+						//going to need to change the way this works!
+						outputTimeReference = (musicFile.getCurrentReadingIndex()*frameSize)/((double)sampleRate);
+						if(doneReading&&musicFile.currentDistance()<2)
+						{
+							System.out.println("DONE READING?");
+							songFinished = true;
+							return false;
+						}
+					}else
+					{
+
+					}
+
+				}
+
+				return true;
+			}
+
+			@Override
+			public void postRunning()
+			{
+			}
+
+		};
 	}
+
+	/**
+	 * Allows people to do what they like with the array after post writing
+	 * Note that the object that this is written to is overwritten every time this method is called
+	 * so you have to copy the values in order to store them
+	 * @param longerArray
+	 */
+	public abstract void postWriteMethod(short[] longerArray);
+
+	/**
+	 * This is called when the output needs to stop happening so that we can buffer
+	 */
+	public abstract void buffering();
+
+	/**
+	 * This is called when the input needs to stop happening so the output can catch up
+	 */
+	public abstract void slowingDownInput();
 }
