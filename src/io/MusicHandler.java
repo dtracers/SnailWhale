@@ -1,10 +1,6 @@
 package io;
 
-import java.io.File;
 import java.util.ArrayList;
-
-import math.StaticNumbers;
-
 
 import static math.StaticNumbers.*;
 import util.SafeReadWriteLoopingArray;
@@ -14,7 +10,7 @@ public abstract class MusicHandler
 {
 	InputDevice decoder;
 	OutputDevice device;
-	SafeReadWriteLoopingArray<short[]> musicFile;
+	protected SafeReadWriteLoopingArray<short[]> musicFile;
 
 	short[] buf;
 
@@ -37,6 +33,12 @@ public abstract class MusicHandler
 	{
 		buf = new short[frameSize*2];
 		musicFile = new SafeReadWriteLoopingArray<short[]>(true,maxBufferDistance,true,minBufferDistance,arraySampleLength);
+
+		//initializes a bunch of empty short arrays
+		for(int k = 0;k<arraySampleLength;k++)
+		{
+			musicFile.initializeElements(new short[frameSize]);
+		}
 	}
 
 	/**
@@ -52,7 +54,7 @@ public abstract class MusicHandler
 	 */
 	public void loadAndStart(InputDevice input,OutputDevice output)
 	{
-		loadSound(input);
+		loadInput(input);
 		loadOutput(output);
 		initializeInput();
 		initializeOutput();
@@ -60,7 +62,17 @@ public abstract class MusicHandler
 		outputThread.start();
 	}
 
-	public void loadSound(InputDevice input)
+	public void startThreads()
+	{
+		if(inputThread == null)
+			initializeInput();
+		inputThread.start();
+		if(outputThread == null)
+			initializeOutput();
+		outputThread.start();
+	}
+
+	public void loadInput(InputDevice input)
 	{
 		buffering = true;
 		musicFile.reset();
@@ -108,22 +120,23 @@ public abstract class MusicHandler
 					{
 						readSong = decoder.readSamples(currentFrame,0, frameSize);
 					}
-					if(!stopRunning)
-						inputTimeReference = (musicFile.getCurrentWritingIndex()*frameSize)/((double)sampleRate);
-					if(musicFile.getCurrentWritingIndex()%4==0)
+					inputTimeReference = (musicFile.getTotalWritingIndex()*frameSize)/((double)sampleRate);
+					if(musicFile.getTotalWritingIndex()%4==0)
 					{
-						combineArray(musicFile, musicFile.getCurrentWritingIndex()-4);
+						combineArray(musicFile, musicFile.getTotalWritingIndex()-4);
 						postWriteMethod(longerArray);
 					}
 				}else
 				{
 					if(buffering)
 					{
+						//the input has caught up time to output the sound again
+						buffering = false;
 						outputThread.startThread();
 					}
 					slowingDownBuffer = true;
-					inputThread.stopThread();
 				}
+
 				return readSong>0;
 			}
 			private void combineArray(SafeReadWriteLoopingArray<short[]> musicFile, int startIndex)
@@ -144,6 +157,7 @@ public abstract class MusicHandler
 			{
 				doneReading = true;
 				musicFile.setMinDistance(true, 0);
+				finishedSongInput();
 			}
 
 		};
@@ -157,33 +171,29 @@ public abstract class MusicHandler
 			@Override
 			public boolean update() throws InterruptedException
 			{
-
 				if(!songFinished)
 				{
 					if(musicFile.canRead())
 					{
 						short[] currentFrame = musicFile.readElement();
 						device.writeSamples(currentFrame, 0, frameSize);
-						if(!musicFile.canWrite())
-						{
-							inputThread.stopThread();
-						}else
-						{
-							inputThread.startThread();
-						}
 						//going to need to change the way this works!
-						outputTimeReference = (musicFile.getCurrentReadingIndex()*frameSize)/((double)sampleRate);
+						outputTimeReference = (musicFile.getTotalReadingIndex()*frameSize)/((double)sampleRate);
 						if(doneReading&&musicFile.currentDistance()<2)
 						{
 							System.out.println("DONE READING?");
 							songFinished = true;
 							return false;
 						}
-
 					}else
 					{
 						buffering = true;
 						outputThread.stopThread();
+					}
+
+					if(musicFile.canWrite()&&slowingDownBuffer)
+					{
+						slowingDownBuffer = false;
 					}
 
 				}
@@ -194,10 +204,29 @@ public abstract class MusicHandler
 			@Override
 			public void postRunning()
 			{
+				finishedSongOutput();
 			}
 
 		};
 	}
+
+	/**
+	 * This is the distance between the total numberof reads and the total number of r reading and the writing
+	 * @return
+	 */
+	public final int bufferingDistance()
+	{
+		return musicFile.currentDistance();
+	}
+
+	public boolean isBuffering()
+	{
+		return buffering;
+	}
+
+	protected abstract void finishedSongOutput();
+
+	protected abstract void finishedSongInput();
 
 	/**
 	 * Allows people to do what they like with the array after post writing
@@ -216,4 +245,6 @@ public abstract class MusicHandler
 	 * This is called when the input needs to stop happening so the output can catch up
 	 */
 	public abstract void slowingDownInput();
+
+	public abstract void dispose();
 }
