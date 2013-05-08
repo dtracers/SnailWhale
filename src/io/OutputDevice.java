@@ -5,7 +5,7 @@ package io;
  * @author gigemjt
  *
  */
-public abstract class OutputDevice
+public interface OutputDevice
 {
 	/** @return whether this AudioDevice is in mono or stereo mode. */
 	public abstract boolean isMono();

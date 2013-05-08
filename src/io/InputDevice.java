@@ -1,6 +1,6 @@
 package io;
 
-public abstract class InputDevice
+public interface InputDevice
 {
 	public abstract int readSamples(short[] samples, int offset, int numSamples);
 
