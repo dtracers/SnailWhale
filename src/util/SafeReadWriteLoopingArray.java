@@ -250,4 +250,9 @@ public class SafeReadWriteLoopingArray<E> extends DoubleLoopingArray<E>
 		return list;
 	}
 
+	public void empty()
+	{
+		list.clear();
+	}
+
 }
