@@ -82,7 +82,7 @@ public abstract class StoppableThread extends Thread
 		toWait = true;
 	}
 
-	public final void playThread()
+	public final void startThread()
 	{
 		myNotify();
 	}

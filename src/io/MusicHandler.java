@@ -30,13 +30,34 @@ public abstract class MusicHandler
 
 	private boolean stopRunning = false;
 
-	StoppableThread input;
-	StoppableThread output;
+	StoppableThread inputThread;
+	StoppableThread outputThread;
 
 	public MusicHandler()
 	{
 		buf = new short[frameSize*2];
 		musicFile = new SafeReadWriteLoopingArray<short[]>(true,maxBufferDistance,true,minBufferDistance,arraySampleLength);
+	}
+
+	/**
+	 * Calls  in this order
+	 * loadSound
+	 * loadOutput
+	 * initializeInput
+	 * initializeOutput
+	 * input.start()
+	 * output.start()
+	 * @param input
+	 * @param output
+	 */
+	public void loadAndStart(InputDevice input,OutputDevice output)
+	{
+		loadSound(input);
+		loadOutput(output);
+		initializeInput();
+		initializeOutput();
+		inputThread.start();
+		outputThread.start();
 	}
 
 	public void loadSound(InputDevice input)
@@ -46,12 +67,20 @@ public abstract class MusicHandler
 		slowingDownBuffer = false;
 		forceStop = false;
 
+		stopRunning = false;
+
 		decoder = input;
+	}
+
+	public void loadOutput(OutputDevice output)
+	{
+		songFinished = false;
+		device = output;
 	}
 
 	public final void initializeInput()
 	{
-		input = new StoppableThread()
+		inputThread = new StoppableThread()
 		{
 			int readSong = 1;
 			short[] longerArray = new short[LargeFrameSize];
@@ -88,8 +117,12 @@ public abstract class MusicHandler
 					}
 				}else
 				{
+					if(buffering)
+					{
+						outputThread.startThread();
+					}
 					slowingDownBuffer = true;
-					input.stopThread();
+					inputThread.stopThread();
 				}
 				return readSong>0;
 			}
@@ -118,7 +151,7 @@ public abstract class MusicHandler
 
 	public final void initializeOutput()
 	{
-		output = new StoppableThread()
+		outputThread = new StoppableThread()
 		{
 
 			@Override
@@ -133,10 +166,10 @@ public abstract class MusicHandler
 						device.writeSamples(currentFrame, 0, frameSize);
 						if(!musicFile.canWrite())
 						{
-							input.stopThread();
+							inputThread.stopThread();
 						}else
 						{
-							input.stopThread();
+							inputThread.startThread();
 						}
 						//going to need to change the way this works!
 						outputTimeReference = (musicFile.getCurrentReadingIndex()*frameSize)/((double)sampleRate);
@@ -146,9 +179,11 @@ public abstract class MusicHandler
 							songFinished = true;
 							return false;
 						}
+
 					}else
 					{
-
+						buffering = true;
+						outputThread.stopThread();
 					}
 
 				}
