@@ -246,7 +246,11 @@ public abstract class MusicHandler
 	 */
 	public abstract void slowingDownInput();
 
-	public abstract void dispose();
+	public void dispose()
+	{
+		inputThread.end();
+		outputThread.end();
+	}
 
 	public void pauseOutput()
 	{
